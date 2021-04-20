@@ -1,0 +1,131 @@
+"""
+Created on Tue Mar 23 15:57:26 2021
+
+@author: iu
+
+Here we obtain the evolution of the relative error of the RBM with respect
+to the exact value from Exact Diagonaisation against the "cleverness" of the 
+RBM which is defined by the parameter alpha.
+"""
+import netket as nk
+import matplotlib.pyplot as plt
+import numpy as np
+import math
+import json
+import time
+
+#Lattice size
+L = 30
+
+#lattice
+
+g = nk.graph.Hypercube(length=L, n_dim=1, pbc=True)
+
+#hilbert space
+
+hi = nk.hilbert.Spin(s=0.5, graph=g)
+
+#hamiltonian defined
+
+ha = nk.operator.Ising(h=1.5, hilbert=hi, J=0.1)
+
+
+#now define the Restricted Boltzmann machine
+def RBMising(alpha, learning_rate, iterations, samples):
+    
+    #Hilbert space (hi) and hamiltonian (ha) need to already be defined
+    #RBM machine
+    ma = nk.machine.RbmSpin(alpha=alpha, hilbert=hi)
+    
+    #sampler
+    sa = nk.sampler.MetropolisExchange(machine=ma)
+    ma.init_random_parameters(seed=123, sigma=0.01)
+    
+    #optimizer
+    op = nk.optimizer.Sgd(learning_rate=learning_rate)
+    
+    #reconfiguration
+    gs = nk.variational.Vmc(
+    hamiltonian=ha,
+    sampler=sa,
+    optimizer=op,
+    n_samples=samples,
+    diag_shift=0.1,
+    use_iterative=True,
+    method='Sr')
+    
+    #running the RBM
+    gs.run(output_prefix='RBM', n_iter=iterations)
+
+    
+    # import the data from log file
+    data=json.load(open("RBM.log"))
+
+    # Extract the relevant information
+    iters=[]
+    energy_RBM=[]
+
+    for i in data["Output"]:
+        iters.append(i["Iteration"])
+        energy_RBM.append(i["Energy"]["Mean"])
+    exact_RBM_gs_energy = energy_RBM[len(data["Output"])-1]
+    
+    return iters, energy_RBM, exact_RBM_gs_energy
+#usually: alpha=1, sigma=0.01, learning_rate=0.05 and iterations=600
+
+#Now we'll plot the evolution of the relative error against alpha for
+#different magnetisations of the hamiltonian, as in CarleoTroyer17
+
+#Now we define the fucntion for the Pfeuty's analytical ground state
+def exact_gs(L, h, J):
+    
+    #firstly we define the lsit for the summation of the lambda term
+    lambda_list = []
+    
+    #next, we explicitly calculate all the k values of lambda
+    for k in range(L):
+    
+        lambda_k = math.sqrt(1 + (J/(2*h))**2 + 
+                            (J/h)*math.cos(
+                            2*math.pi*(k/(2*L))))
+        
+        lambda_list.append(lambda_k)
+        
+    #finally, we put everything together to obtain the ground state energy        
+    Lambda = sum(lambda_list)
+    E_o = -h * Lambda
+
+    
+    return E_o
+
+
+#now define the iterative process to get the rel. errors for the energies
+#for different values of alpha
+
+
+alpha = []
+error = []
+
+for i in range(1,5):
+    
+    res_RBM = RBMising(i, 0.05, 300, 600)
+    res_ANA = exact_gs(30,1.5,0.1)
+    err_rel = abs((res_RBM[2] - res_ANA)/res_ANA)*100
+    
+    alpha.append(i)
+    error.append(err_rel)
+
+
+#Finally we plot all this
+plt.plot(alpha, error, 'bs' , label='RBM run')
+
+
+plt.ylabel('Relative error')
+plt.xlabel('alpha')
+plt.text((alpha[0] + 0.1) , error[0], r'$\alpha = 1$', fontsize = 12)
+plt.text((alpha[1] + 0.1) , error[1], r'$\alpha = 2$', fontsize = 12)
+plt.text((alpha[2] + 0.1) , error[2], r'$\alpha = 3$', fontsize = 12)
+plt.text((alpha[3] - 0.4) , (error[3]), r'$\alpha = 4$', fontsize = 12)
+
+plt.legend()
+plt.show()    
