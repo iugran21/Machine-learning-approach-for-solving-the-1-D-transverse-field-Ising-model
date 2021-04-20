@@ -1,0 +1,128 @@
+"""
+Created on Mon Apr 12 14:38:20 2021
+
+@author: iu
+
+This is the Result 1 where we compute the ground state energy with the 
+analytical formula from Pierre Pfeuty's paper and compare it to the result 
+from the RBM. Next, we compute the relative error between these two
+values. Finally, we obtain the graph for itertions against 
+energy to see how many iterations it takes the RBM to reach the exact value
+of the ground state energy.
+
+"""
+import netket as nk
+import matplotlib.pyplot as plt
+import json
+import time
+import math
+
+
+#Size of lattice
+L = 30
+
+#lattice
+
+g = nk.graph.Hypercube(length=L, n_dim=1, pbc=True)
+
+#hilbert space
+
+hi = nk.hilbert.Spin(s=0.5, graph=g)
+
+#hamiltonian
+
+ha = nk.operator.Ising(h=1.5, hilbert=hi, J=0.1)
+
+#first of all, we define the RBM function with the previous set parameters
+def RBMising(alpha, learning_rate, iterations, samples):
+   
+    #RBM machine
+    ma = nk.machine.RbmSpin(alpha=alpha, hilbert=hi)
+    
+    #sampler
+    sa = nk.sampler.MetropolisExchange(machine=ma)
+    ma.init_random_parameters(seed=123, sigma=0.01)
+    
+    #optimizer
+    op = nk.optimizer.Sgd(learning_rate=learning_rate)
+    
+    #reconfiguration
+    gs = nk.variational.Vmc(
+    hamiltonian=ha,
+    sampler=sa,
+    optimizer=op,
+    n_samples=samples,
+    diag_shift=0.1,
+    use_iterative=True,
+    method='Gd')
+    
+    #running the RBM and time it
+    start = time.time()
+    gs.run(output_prefix='RBM', n_iter=iterations)
+    end = time.time()
+    
+    # import the data from log file
+    data=json.load(open("RBM.log"))
+
+    # Extract the relevant information
+    iters=[]
+    energy_RBM=[]
+
+    for i in data["Output"]:
+        iters.append(i["Iteration"])
+        energy_RBM.append(i["Energy"]["Mean"])
+    exact_RBM_gs_energy = energy_RBM[len(data["Output"])-1]
+    
+    return iters, energy_RBM, exact_RBM_gs_energy, end-start
+
+#Now we define the fucntion for the Pfeuty's analytical ground state
+def exact_gs(L, h, J):
+    
+    #firstly we define the lsit for the summation of the lambda term
+    lambda_list = []
+    
+    #next, we explicitly calculate all the k values of lambda
+    for k in range(L):
+    
+        lambda_k = math.sqrt(1 + (J/(2*h))**2 + 
+                            (J/h)*math.cos(
+                            2*math.pi*(k/(2*L))))
+        
+        lambda_list.append(lambda_k)
+        
+    #finally, we put everything together to obtain the ground state energy        
+    Lambda = sum(lambda_list)
+    E_o = -h * Lambda
+
+    
+    return E_o
+
+
+#Now, we calculate both results here 
+res_RBM = RBMising(2,0.05,300,600)
+res_ANA = exact_gs(30,1.5,0.1)
+print(res_RBM[2])
+print(res_ANA)
+
+#Finally for the first part, we compute the relative error calculation
+err_rel_RBM = abs((res_RBM[2] - res_ANA)/res_ANA)*100
+
+print('Relative error RBM:',err_rel_RBM)
+
+
+#Now, to end this first result, we plot the graph of energy against iterations
+plt.plot(res_RBM[0], res_RBM[1], color = 'blue', label='Energy (RBM)')
+
+plt.ylabel('Energy [eV]')
+plt.xlabel('#Iteration')
+plt.axhline(y=res_ANA, xmin=0, linewidth=2, color='k',
+            label='Energy (Analytical)')
+
+
+plt.text(200, (res_ANA + 0.05),
+         r'$ E_o = -h \sum_{k} \Lambda_k $', {'color': 'k', 'fontsize' : 15})
+
+plt.legend()
+plt.show()
+
+
